@@ -1,68 +1,98 @@
 @echo off
 setlocal enabledelayedexpansion
 
-REM Path to Steam libraryfolders.vdf (adjust for your system)
-set "LIBRARY_FILE=D:\SteamLibrary\libraryfolder.vdf"
-set "EXTERNAL_LIB_PATH=D:\SteamLibrary\steamapps\"
+echo Steam Game Validator
+echo ====================
+echo.
 
-REM Check if libraryfolders.vdf exists
-if not exist "%LIBRARY_FILE%" (
-    echo Error: Steam libraryfolder.vdf not found at %LIBRARY_FILE%
-    exit /b 1
+REM Create temporary file
+set "TEMP_APPS=%TEMP%\steam_apps.txt"
+if exist "%TEMP_APPS%" del "%TEMP_APPS%"
+
+echo Scanning drives D, E, F, G, H for Steam libraries...
+echo.
+
+REM Scan drives D through H for SteamLibrary folders
+for %%d in (D E F G H) do (
+    if exist "%%d:\SteamLibrary\steamapps" (
+        echo Found: %%d:\SteamLibrary\steamapps
+        call :ScanLibrary "%%d:\SteamLibrary\steamapps"
+    )
 )
-
-REM Create temporary file for app IDs
-set "TEMP_FILE=%TEMP%\steam_apps.txt"
-if exist "%TEMP_FILE%" del "%TEMP_FILE%"
-
-REM Extract library paths from libraryfolders.vdf
-echo Scanning Steam libraries for installed games...
-for /f "tokens=2 delims=^" %%a in ('findstr /r "\"path\"" "%LIBRARY_FILE%"') do (
-    set "path=%%a"
-    set "path=!path:*"=!"
-    set "path=!path:"=!"
-    call :ProcessLibrary "!path!"
-)
-
-REM Also check external library
-call :ProcessLibrary "%EXTERNAL_LIB_PATH%"
 
 REM Check if any games were found
-if not exist "%TEMP_FILE%" (
+if not exist "%TEMP_APPS%" (
+    echo.
     echo No installed Steam games found.
+    echo.
+    pause
     exit /b 0
 )
 
-REM Display found games
+REM Remove duplicates
 echo.
-echo Found installed games:
-type "%TEMP_FILE%"
+echo Processing game list...
+sort "%TEMP_APPS%" /unique > "%TEMP_APPS%.sorted"
+move /y "%TEMP_APPS%.sorted" "%TEMP_APPS%" >nul 2>&1
+
 echo.
-echo Starting validation process...
+echo ============================================
+echo Found installed game App IDs:
+echo ============================================
+type "%TEMP_APPS%"
+echo ============================================
 echo.
 
-REM Validate each game
-for /f %%i in (%TEMP_FILE%) do (
-    echo Validating game with App ID: %%i
-    start steam://validate/%%i
-    timeout /t 5 /nobreak >nul
+REM Count games
+for /f %%c in ('type "%TEMP_APPS%" ^| find /c /v ""') do set "game_count=%%c"
+echo Total games found: %game_count%
+echo.
+
+REM Ask for confirmation
+set /p "confirm=Start validation for all %game_count% games? (Y/N): "
+if /i not "%confirm%"=="Y" (
+    echo Validation cancelled.
+    goto cleanup
 )
 
 echo.
-echo Validation process completed for all installed games.
+echo Starting validation process...
+echo Please keep Steam running.
+echo.
 
-REM Cleanup
-del "%TEMP_FILE%"
+REM Validate each game
+set "counter=0"
+for /f "delims=" %%i in (%TEMP_APPS%) do (
+    set /a counter+=1
+    echo [!counter!/%game_count%] Validating App ID: %%i
+    start "" "steam://validate/%%i"
+    timeout /t 3 /nobreak >nul 2>&1
+)
+
+echo.
+echo ============================================
+echo Validation initiated for all games!
+echo ============================================
+echo Check Steam Downloads page to monitor progress.
+echo.
+pause
+
+:cleanup
+if exist "%TEMP_APPS%" del "%TEMP_APPS%" 2>nul
 exit /b 0
 
-:ProcessLibrary
-REM Function to process a library directory
-set "lib_path=%~1"
-if exist "%lib_path%" (
-    for %%f in ("%lib_path%\appmanifest_*.acf") do (
-        set "filename=%%~nf"
-        set "appid=!filename:appmanifest_=!"
-        echo !appid! >> "%TEMP_FILE%"
+:ScanLibrary
+set "lib=%~1"
+if exist "%lib%" (
+    pushd "%lib%" 2>nul
+    if not errorlevel 1 (
+        for %%f in (appmanifest_*.acf) do (
+            set "fname=%%~nf"
+            for /f "tokens=2 delims=_." %%n in ("!fname!") do (
+                echo %%n>> "%TEMP_APPS%"
+            )
+        )
+        popd
     )
 )
 exit /b
